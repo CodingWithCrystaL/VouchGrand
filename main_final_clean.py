@@ -7,12 +7,12 @@ from flask import Flask
 from threading import Thread
 import os
 
-# === RAILWAY ENVIRONMENT VARIABLES ===
+# === Railway Environment Variables ===
 TOKEN = os.getenv("TOKEN")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
 GUILD_ID = int(os.getenv("GUILD_ID"))
 
-# === KEEP ALIVE (Optional) ===
+# === Keep Alive ===
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -21,7 +21,7 @@ def keep_alive():
     Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8080}).start()
 keep_alive()
 
-# === BOT SETUP ===
+# === Bot Setup ===
 intents = discord.Intents.default()
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -59,7 +59,7 @@ PRODUCTS = [
 
 GRANDX_LOGO_URL = "https://cdn.discordapp.com/attachments/1226891662254286911/1235928196612139090/7E21D39E-ECDF-4C6C-B393-347F979B16CE.jpeg"
 
-# === DB INIT ===
+# === Database Setup ===
 async def init_db():
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute("""
@@ -75,7 +75,7 @@ async def init_db():
         """)
         await db.commit()
 
-# === DROPDOWNS ===
+# === Dropdowns ===
 class ProductSelect(Select):
     def __init__(self, view):
         self.parent_view = view
@@ -120,19 +120,20 @@ class RatingView(View):
         self.parent_view = parent_view
         self.add_item(RatingSelect(parent_view))
 
-# === READY EVENT ===
+# === On Bot Ready ===
 @bot.event
 async def on_ready():
     await init_db()
     try:
-        synced = await tree.sync(guild=discord.Object(id=GUILD_ID))
-        print(f"✅ Synced {len(synced)} commands to GUILD_ID: {GUILD_ID}")
+        await tree.clear_commands(guild=discord.Object(id=GUILD_ID))  # Clears old commands
+        await tree.sync(guild=discord.Object(id=GUILD_ID))            # Syncs new
+        print("✅ Slash commands synced")
     except Exception as e:
-        print(f"❌ Command sync failed: {e}")
+        print(f"❌ Failed to sync commands: {e}")
     await bot.change_presence(activity=discord.Game(name="Vouching Service"))
     print(f"✅ Bot is online as {bot.user}")
 
-# === VOUCH COMMAND ===
+# === /vouch Command ===
 @tree.command(name="vouch", description="Give a vouch to someone", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User to vouch for", feedback="Your feedback message")
 async def vouch(interaction: discord.Interaction, user: discord.Member, feedback: str):
@@ -141,11 +142,7 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
         return
 
     view = ProductRatingView()
-    if interaction.response.is_done():
-        await interaction.followup.send("Please select a product to vouch for:", view=view, ephemeral=True)
-    else:
-        await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
-
+    await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
     await view.wait()
 
     if not view.product or not view.rating:
@@ -172,7 +169,7 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
 
     await interaction.followup.send("✅ Your vouch has been submitted!", ephemeral=True)
 
-# === RUN BOT ===
+# === Run Bot ===
 try:
     bot.run(TOKEN)
 except Exception as e:
