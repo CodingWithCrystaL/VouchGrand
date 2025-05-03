@@ -4,28 +4,41 @@ from discord import app_commands
 from discord.ui import View, Select
 import aiosqlite
 import os
-from keep_alive import keep_alive
+from flask import Flask
+from threading import Thread
 
-# === Keep alive for Railway ===
+# === KEEP ALIVE SERVER ===
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "✅ Bot is alive!"
+
+def keep_alive():
+    Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8080}).start()
+
 keep_alive()
 
-# === Environment Variables ===
+# === ENV VARIABLES ===
 TOKEN = os.getenv("TOKEN")
-GUILD_ID = os.getenv("GUILD_ID")
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))
+GUILD_ID = int(os.getenv("GUILD_ID", 0))
 
-# === Discord Bot Setup ===
+if not TOKEN or not LOG_CHANNEL_ID or not GUILD_ID:
+    print("❌ Missing one or more required environment variables.")
+    exit()
+
+# === DISCORD BOT SETUP ===
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="/", intents=intents)
 tree = bot.tree
 
-# === Database ===
 DB_FILE = "vouches.db"
 
-# === Product & Rating Lists ===
+# === PRODUCT LIST (MAX 25) ===
 products = [
     ("1337-ch3at5", "1337-ch3at5"),
     ("grandrp-m0n3y", "grandrp-m0n3y"),
@@ -47,62 +60,30 @@ products = [
     ("FreeFire-P4N3LS", "FreeFire-P4N3LS"),
     ("FreeFire-D14MONDS", "FreeFire-D14MONDS"),
     ("FreeFire-ACC0UN7S", "FreeFire-ACC0UN7S"),
-    ("FreeFire-TOURN4M3NT", "FreeFire-TOURN4M3NT"),
     ("BGMI-ACC0UN7S", "BGMI-ACC0UN7S"),
     ("BGMI-UC", "BGMI-UC"),
-    ("BGMI-TOURN4M3NT", "BGMI-TOURN4M3NT"),
     ("4M4ZON-SHOP", "4M4ZON-SHOP"),
     ("OTHER PRODUCT", "OTHER PRODUCT")
 ]
 
 ratings = [
-    ("5/5 ⭐⭐⭐⭐⭐", "5"),
-    ("4/5 ⭐⭐⭐⭐", "4"),
-    ("3/5 ⭐⭐⭐", "3"),
-    ("2/5 ⭐⭐", "2"),
-    ("1/5 ⭐", "1")
+    ("⭐ 1/5", "1"),
+    ("⭐⭐ 2/5", "2"),
+    ("⭐⭐⭐ 3/5", "3"),
+    ("⭐⭐⭐⭐ 4/5", "4"),
+    ("⭐⭐⭐⭐⭐ 5/5", "5")
 ]
-
-class ProductSelect(Select):
-    def __init__(self, view):
-        self.parent_view = view
-        options = [discord.SelectOption(label=label, value=value) for value, label in products]
-        super().__init__(placeholder="Select a Product", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.product = self.values[0]
-        await interaction.response.defer()
-        self.parent_view.stop()
-
-class RatingSelect(Select):
-    def __init__(self, view):
-        self.parent_view = view
-        options = [discord.SelectOption(label=label, value=value) for label, value in ratings]
-        super().__init__(placeholder="Select Rating", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.rating = self.values[0]
-        await interaction.response.defer()
-        self.parent_view.stop()
-
-class ProductView(View):
-    def __init__(self):
-        super().__init__(timeout=60)
-        self.product = None
-        self.rating = None
-        self.add_item(ProductSelect(self))
-
-class RatingView(View):
-    def __init__(self):
-        super().__init__(timeout=60)
-        self.rating = None
-        self.add_item(RatingSelect(self))
 
 @bot.event
 async def on_ready():
-    print(f"✅ Bot is online as {bot.user}")
-    synced = await tree.sync(guild=discord.Object(id=int(GUILD_ID)))
-    print(f"Synced {len(synced)} commands.")
+    print(f"✅ Bot is online as {bot.user} (ID: {bot.user.id})")
+    try:
+        synced = await tree.sync(guild=discord.Object(id=GUILD_ID))
+        print(f"✅ Synced {len(synced)} command(s) to guild ID {GUILD_ID}")
+    except Exception as e:
+        print(f"❌ Sync error: {e}")
+
+    await bot.change_presence(status=discord.Status.online, activity=discord.Game("Vouching Service"))
 
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute('''
@@ -111,56 +92,82 @@ async def on_ready():
                 vouched_user_id INTEGER,
                 vouched_by_id INTEGER,
                 product TEXT,
-                rating TEXT,
+                rating INTEGER,
                 feedback TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         await db.commit()
 
-@tree.command(name="vouch", description="Vouch for a user", guild=discord.Object(id=int(GUILD_ID)))
+class ProductSelect(Select):
+    def __init__(self, parent):
+        self.parent = parent
+        options = [discord.SelectOption(label=label, value=value) for value, label in products]
+        super().__init__(placeholder="Select a product", options=options)
+
+    async def callback(self, interaction):
+        self.parent.product = self.values[0]
+        await interaction.response.defer()
+        self.parent.stop()
+
+class RatingSelect(Select):
+    def __init__(self, parent):
+        self.parent = parent
+        options = [discord.SelectOption(label=label, value=value) for label, value in ratings]
+        super().__init__(placeholder="Select a rating", options=options)
+
+    async def callback(self, interaction):
+        self.parent.rating = int(self.values[0])
+        await interaction.response.defer()
+        self.parent.stop()
+
+class ProductRatingView(View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        self.product = None
+        self.rating = None
+        self.add_item(ProductSelect(self))
+        self.add_item(RatingSelect(self))
+
+@tree.command(name="vouch", description="Submit a vouch for a user", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User to vouch for", feedback="Your feedback")
 async def vouch(interaction: discord.Interaction, user: discord.Member, feedback: str):
     if user.id == interaction.user.id:
-        await interaction.response.send_message("❌ You can't vouch for yourself!", ephemeral=True)
+        await interaction.response.send_message("❌ You cannot vouch for yourself.", ephemeral=True)
         return
 
-    view = ProductView()
-    await interaction.response.send_message("Select a product:", view=view, ephemeral=True)
-    await view.wait()
-    if not view.product:
-        await interaction.followup.send("⚠️ You didn't select a product.", ephemeral=True)
-        return
+    view = ProductRatingView()
+    await interaction.response.send_message("Please select the product and rating:", view=view, ephemeral=True)
+    timeout = await view.wait()
 
-    rating_view = RatingView()
-    await interaction.followup.send("Select rating:", view=rating_view, ephemeral=True)
-    await rating_view.wait()
-    if not rating_view.rating:
-        await interaction.followup.send("⚠️ You didn't select a rating.", ephemeral=True)
+    if timeout or not view.product or not view.rating:
+        await interaction.followup.send("⏰ Timed out or selection not made. Try again.", ephemeral=True)
         return
 
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute(
             "INSERT INTO vouches (vouched_user_id, vouched_by_id, product, rating, feedback) VALUES (?, ?, ?, ?, ?)",
-            (user.id, interaction.user.id, view.product, rating_view.rating, feedback)
+            (user.id, interaction.user.id, view.product, view.rating, feedback)
         )
         await db.commit()
+        cursor = await db.execute("SELECT last_insert_rowid()")
+        (vouch_id,) = await cursor.fetchone()
 
-    embed = discord.Embed(title="Feedback Received", color=discord.Color.green())
-    embed.add_field(name="Customer", value=user.mention, inline=False)
-    embed.add_field(name="Rating", value=f"{rating_view.rating} ⭐", inline=False)
-    embed.add_field(name="Feedback", value=f"+rep {user.mention} {feedback}", inline=False)
-    embed.set_thumbnail(url="https://i.imgur.com/iywsi5L.png")
-    embed.set_footer(text="Thanks for your support! • Made by Kai")
+    embed = discord.Embed(
+        title=f"📬 Feedback Received",
+        description="We received feedback for your transaction!",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="Customer", value=f"<@{user.id}>", inline=True)
+    embed.add_field(name="Rating", value=f"{view.rating} ⭐", inline=True)
+    embed.add_field(name="Feedback", value=feedback, inline=False)
+    embed.set_thumbnail(url="https://cdn.discordapp.com/attachments/1214425023717169172/1236229832585263135/7E21D39E-ECDF-4C6C-B393-347F979B16CE.jpeg")
+    embed.set_footer(text="❤ Thanks for your support! • Made by Kai")
 
     channel = bot.get_channel(LOG_CHANNEL_ID)
     if channel:
         await channel.send(embed=embed)
 
-    await interaction.followup.send("✅ Your vouch has been recorded!", ephemeral=True)
+    await interaction.followup.send("✅ Your feedback has been submitted successfully!", ephemeral=True)
 
-# Run bot
-if TOKEN:
-    bot.run(TOKEN)
-else:
-    print("❌ No TOKEN found in environment variables.")
+bot.run(TOKEN)
