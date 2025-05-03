@@ -35,7 +35,7 @@ PRODUCTS = [
     ("OTHER PRODUCT", "OTHER PRODUCT")
 ]
 
-LOGO_URL = "https://cdn.discordapp.com/attachments/1227218043652812880/1237143257738928168/logo.jpg"
+LOGO_URL = "https://cdn.discordapp.com/attachments/1328282907814531073/1368106724795351102/BD9E3BFA-F422-4AF8-8AF2-349AD4D3E145.png"
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
