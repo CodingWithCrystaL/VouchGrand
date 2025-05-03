@@ -3,37 +3,30 @@ from discord.ext import commands
 from discord import app_commands
 from discord.ui import View, Select
 import aiosqlite
-from flask import Flask
-from threading import Thread
 import os
+from keep_alive import keep_alive
 
-# === Railway Environment Variables ===
-TOKEN = os.getenv("TOKEN")
-print(f"TOKEN loaded: {bool(TOKEN)}")
-
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
-print(f"LOG_CHANNEL_ID loaded: {os.getenv('LOG_CHANNEL_ID')}")
-
-GUILD_ID = int(os.getenv("GUILD_ID"))
-print(f"GUILD_ID loaded: {os.getenv('GUILD_ID')}")
-
-# === Keep Alive ===
-app = Flask(__name__)
-@app.route('/')
-def home():
-    return "✅ Bot is alive!"
-def keep_alive():
-    Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': 8080}).start()
+# === Keep alive for Railway ===
 keep_alive()
 
-# === Bot Setup ===
+# === Environment Variables ===
+TOKEN = os.getenv("TOKEN")
+GUILD_ID = os.getenv("GUILD_ID")
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 0))
+
+# === Discord Bot Setup ===
 intents = discord.Intents.default()
+intents.guilds = True
 intents.members = True
+
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
+
+# === Database ===
 DB_FILE = "vouches.db"
 
-PRODUCTS = [
+# === Product & Rating Lists ===
+products = [
     ("1337-ch3at5", "1337-ch3at5"),
     ("grandrp-m0n3y", "grandrp-m0n3y"),
     ("grandrp-acc0unt5", "grandrp-acc0unt5"),
@@ -62,115 +55,112 @@ PRODUCTS = [
     ("OTHER PRODUCT", "OTHER PRODUCT")
 ]
 
-GRANDX_LOGO_URL = "https://cdn.discordapp.com/attachments/1226891662254286911/1235928196612139090/7E21D39E-ECDF-4C6C-B393-347F979B16CE.jpeg"
+ratings = [
+    ("5/5 ⭐⭐⭐⭐⭐", "5"),
+    ("4/5 ⭐⭐⭐⭐", "4"),
+    ("3/5 ⭐⭐⭐", "3"),
+    ("2/5 ⭐⭐", "2"),
+    ("1/5 ⭐", "1")
+]
 
-async def init_db():
+class ProductSelect(Select):
+    def __init__(self, view):
+        self.parent_view = view
+        options = [discord.SelectOption(label=label, value=value) for value, label in products]
+        super().__init__(placeholder="Select a Product", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.product = self.values[0]
+        await interaction.response.defer()
+        self.parent_view.stop()
+
+class RatingSelect(Select):
+    def __init__(self, view):
+        self.parent_view = view
+        options = [discord.SelectOption(label=label, value=value) for label, value in ratings]
+        super().__init__(placeholder="Select Rating", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        self.parent_view.rating = self.values[0]
+        await interaction.response.defer()
+        self.parent_view.stop()
+
+class ProductView(View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        self.product = None
+        self.rating = None
+        self.add_item(ProductSelect(self))
+
+class RatingView(View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        self.rating = None
+        self.add_item(RatingSelect(self))
+
+@bot.event
+async def on_ready():
+    print(f"✅ Bot is online as {bot.user}")
+    synced = await tree.sync(guild=discord.Object(id=int(GUILD_ID)))
+    print(f"Synced {len(synced)} commands.")
+
     async with aiosqlite.connect(DB_FILE) as db:
-        await db.execute("""
+        await db.execute('''
             CREATE TABLE IF NOT EXISTS vouches (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 vouched_user_id INTEGER,
                 vouched_by_id INTEGER,
                 product TEXT,
+                rating TEXT,
                 feedback TEXT,
-                rating INTEGER,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-        """)
+        ''')
         await db.commit()
 
-class ProductSelect(Select):
-    def __init__(self, view):
-        self.parent_view = view
-        options = [discord.SelectOption(label=label, value=value) for value, label in PRODUCTS]
-        super().__init__(placeholder="Select your Product", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.product = self.values[0]
-        await interaction.response.send_message("✅ Product selected. Now rate the service:", view=self.parent_view.rating_view, ephemeral=True)
-
-class RatingSelect(Select):
-    def __init__(self, view):
-        self.parent_view = view
-        options = [
-            discord.SelectOption(label="Fast Delivery ⚡", value="5"),
-            discord.SelectOption(label="Legit ✅", value="5"),
-            discord.SelectOption(label="Good 👍", value="4"),
-            discord.SelectOption(label="5/5 ⭐⭐⭐⭐⭐", value="5"),
-            discord.SelectOption(label="4/5 ⭐⭐⭐⭐", value="4"),
-            discord.SelectOption(label="3/5 ⭐⭐⭐", value="3"),
-            discord.SelectOption(label="2/5 ⭐⭐", value="2"),
-            discord.SelectOption(label="1/5 ⭐", value="1"),
-        ]
-        super().__init__(placeholder="Select your Feedback for the Service", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        self.parent_view.rating = int(self.values[0])
-        self.parent_view.stop()
-        await interaction.response.send_message("✅ Rating recorded!", ephemeral=True)
-
-class ProductRatingView(View):
-    def __init__(self):
-        super().__init__(timeout=120)
-        self.product = None
-        self.rating = None
-        self.rating_view = RatingView(self)
-        self.add_item(ProductSelect(self))
-
-class RatingView(View):
-    def __init__(self, parent_view):
-        super().__init__(timeout=60)
-        self.parent_view = parent_view
-        self.add_item(RatingSelect(parent_view))
-
-@bot.event
-async def on_ready():
-    await init_db()
-    try:
-        await tree.clear_commands(guild=discord.Object(id=GUILD_ID))
-        await tree.sync(guild=discord.Object(id=GUILD_ID))
-        print("✅ Slash commands synced")
-    except Exception as e:
-        print(f"❌ Failed to sync commands: {e}")
-    await bot.change_presence(activity=discord.Game(name="Vouching Service"))
-    print(f"✅ Bot is online as {bot.user}")
-
-@tree.command(name="vouch", description="Give a vouch to someone", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user="User to vouch for", feedback="Your feedback message")
+@tree.command(name="vouch", description="Vouch for a user", guild=discord.Object(id=int(GUILD_ID)))
+@app_commands.describe(user="User to vouch for", feedback="Your feedback")
 async def vouch(interaction: discord.Interaction, user: discord.Member, feedback: str):
     if user.id == interaction.user.id:
-        await interaction.response.send_message("❌ You can't vouch for yourself.", ephemeral=True)
+        await interaction.response.send_message("❌ You can't vouch for yourself!", ephemeral=True)
         return
 
-    view = ProductRatingView()
-    await interaction.response.send_message("Please select a product to vouch for:", view=view, ephemeral=True)
+    view = ProductView()
+    await interaction.response.send_message("Select a product:", view=view, ephemeral=True)
     await view.wait()
+    if not view.product:
+        await interaction.followup.send("⚠️ You didn't select a product.", ephemeral=True)
+        return
 
-    if not view.product or not view.rating:
-        await interaction.followup.send("⏰ You didn't complete the selection in time.", ephemeral=True)
+    rating_view = RatingView()
+    await interaction.followup.send("Select rating:", view=rating_view, ephemeral=True)
+    await rating_view.wait()
+    if not rating_view.rating:
+        await interaction.followup.send("⚠️ You didn't select a rating.", ephemeral=True)
         return
 
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute(
-            "INSERT INTO vouches (vouched_user_id, vouched_by_id, product, feedback, rating) VALUES (?, ?, ?, ?, ?)",
-            (user.id, interaction.user.id, view.product, feedback, view.rating)
+            "INSERT INTO vouches (vouched_user_id, vouched_by_id, product, rating, feedback) VALUES (?, ?, ?, ?, ?)",
+            (user.id, interaction.user.id, view.product, rating_view.rating, feedback)
         )
         await db.commit()
 
-    embed = discord.Embed(title="Feedback Received", description="We received feedback for your transaction!", color=discord.Color.green())
+    embed = discord.Embed(title="Feedback Received", color=discord.Color.green())
     embed.add_field(name="Customer", value=user.mention, inline=False)
-    embed.add_field(name="Rating", value=f"{view.rating} ⭐", inline=False)
-    embed.add_field(name="Feedback", value=feedback, inline=False)
-    embed.set_thumbnail(url=GRANDX_LOGO_URL)
-    embed.set_footer(text="Thanks for your support! | Made by Kai", icon_url=GRANDX_LOGO_URL)
+    embed.add_field(name="Rating", value=f"{rating_view.rating} ⭐", inline=False)
+    embed.add_field(name="Feedback", value=f"+rep {user.mention} {feedback}", inline=False)
+    embed.set_thumbnail(url="https://i.imgur.com/iywsi5L.png")
+    embed.set_footer(text="Thanks for your support! • Made by Kai")
 
     channel = bot.get_channel(LOG_CHANNEL_ID)
     if channel:
         await channel.send(embed=embed)
 
-    await interaction.followup.send("✅ Your vouch has been submitted!", ephemeral=True)
+    await interaction.followup.send("✅ Your vouch has been recorded!", ephemeral=True)
 
-try:
+# Run bot
+if TOKEN:
     bot.run(TOKEN)
-except Exception as e:
-    print(f"❌ Error while running the bot: {e}")
+else:
+    print("❌ No TOKEN found in environment variables.")
