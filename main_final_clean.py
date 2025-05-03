@@ -1,101 +1,102 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import sqlite3
 import os
-import asyncio
+import sqlite3
 
-TOKEN = os.environ['DISCORD_TOKEN']
-GUILD_ID = int(os.environ['GUILD_ID'])
-VOUCH_CHANNEL_ID = int(os.environ['VOUCH_CHANNEL_ID'])
+TOKEN = os.getenv("DISCORD_TOKEN")
+GUILD_ID = int(os.getenv("GUILD_ID"))
+VOUCH_CHANNEL_ID = int(os.getenv("VOUCH_CHANNEL_ID"))
+
+PRODUCTS = [
+    ("1337-ch3at5", "1337-ch3at5"),
+    ("grandrp-m0n3y", "grandrp-m0n3y"),
+    ("grandrp-acc0unt5", "grandrp-acc0unt5"),
+    ("grandrp-m0n3y-m3th0d", "grandrp-m0n3y-m3th0d"),
+    ("tr1gg3r-b0t", "tr1gg3r-b0t"),
+    ("shax-cl3an3r", "shax-cl3an3r"),
+    ("custom-discord-bot", "custom-discord-bot"),
+    ("custom-ch3at3r", "custom-ch3at3r"),
+    ("l3ad3r-scr1pts", "l3ad3r-scr1pts"),
+    ("adm1n-scr1pts", "adm1n-scr1pts"),
+    ("l3ad3r-or-adm1n-appl1cat1on", "l3ad3r-or-adm1n-appl1cat1on"),
+    ("pc-cl3an3r", "pc-cl3an3r"),
+    ("custom-ch3at3r-redux", "custom-ch3at3r-redux"),
+    ("h0w-to-b4n-evad3", "h0w-to-b4n-evad3"),
+    ("premium-b4n-evad3", "premium-b4n-evad3"),
+    ("pc-ch3ck-pr0c3dur3", "pc-ch3ck-pr0c3dur3"),
+    ("V4LOR4NT-SHOP", "V4LOR4NT-SHOP"),
+    ("FreeFire-P4N3LS", "FreeFire-P4N3LS"),
+    ("FreeFire-D14MONDS", "FreeFire-D14MONDS"),
+    ("FreeFire-ACC0UN7S", "FreeFire-ACC0UN7S"),
+    ("BGMI-ACC0UN7S", "BGMI-ACC0UN7S"),
+    ("BGMI-UC", "BGMI-UC"),
+    ("4M4ZON-SHOP", "4M4ZON-SHOP"),
+    ("OTHER PRODUCT", "OTHER PRODUCT")
+]
+
+LOGO_URL = "https://cdn.discordapp.com/attachments/1234359014344626176/1236104487658696785/IMG_20240502_191255.jpg"
 
 intents = discord.Intents.default()
-bot = commands.Bot(command_prefix='!', intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Database setup
-conn = sqlite3.connect("vouches.db")
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS vouches (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT,
-    customer TEXT,
-    product TEXT,
-    feedback TEXT
-)''')
-conn.commit()
-
-class ProductSelect(discord.ui.Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label="grandrp-m0n3y"),
-            discord.SelectOption(label="grandrp-acc0unt5"),
-            discord.SelectOption(label="gta5-m0d"),
-            discord.SelectOption(label="fortnite-vbux"),
-            discord.SelectOption(label="gta5-outfit"),
-            discord.SelectOption(label="discord-nitro"),
-            discord.SelectOption(label="gta5-account"),
-            discord.SelectOption(label="spotify-premium"),
-            discord.SelectOption(label="netflix-premium"),
-            discord.SelectOption(label="telegram-members")
-        ]
-        super().__init__(placeholder="Select a product", min_values=1, max_values=1, options=options)
+class ProductDropdown(discord.ui.Select):
+    def __init__(self, user: discord.User):
+        self.user = user
+        options = [discord.SelectOption(label=label, value=value) for value, label in PRODUCTS]
+        super().__init__(placeholder="Select a product", options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        self.view.selected_product = self.values[0]
-        await interaction.response.send_message("Now type your feedback:", ephemeral=True)
+        await interaction.response.send_modal(FeedbackModal(product=self.values[0], user=self.user))
 
 class ProductView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, user: discord.User):
         super().__init__(timeout=60)
-        self.selected_product = None
-        self.add_item(ProductSelect())
+        self.add_item(ProductDropdown(user))
 
-@bot.tree.command(name="vouch", description="Vouch for a user")
-@app_commands.describe(user="User to vouch for")
-async def vouch(interaction: discord.Interaction, user: discord.User):
-    view = ProductView()
-    await interaction.response.send_message("Please select a product:", view=view, ephemeral=True)
+class FeedbackModal(discord.ui.Modal, title="Provide Feedback"):
+    def __init__(self, product: str, user: discord.User):
+        super().__init__()
+        self.product = product
+        self.user = user
+        self.feedback_input = discord.ui.TextInput(label="Feedback", style=discord.TextStyle.paragraph, required=True)
+        self.add_item(self.feedback_input)
 
-    timeout = await view.wait()
-    if timeout or not view.selected_product:
-        await interaction.followup.send("Timed out or no product selected.", ephemeral=True)
-        return
+    async def on_submit(self, interaction: discord.Interaction):
+        feedback = self.feedback_input.value
 
-    await interaction.followup.send("Type your feedback:", ephemeral=True)
+        # Save to DB
+        conn = sqlite3.connect("vouches.db")
+        cursor = conn.cursor()
+        cursor.execute("""CREATE TABLE IF NOT EXISTS vouches (
+            customer TEXT, product TEXT, feedback TEXT
+        )""")
+        cursor.execute("INSERT INTO vouches (customer, product, feedback) VALUES (?, ?, ?)",
+                       (str(self.user), self.product, feedback))
+        conn.commit()
+        conn.close()
 
-    def check(m):
-        return m.author == interaction.user and m.channel == interaction.channel
+        # Send embed
+        embed = discord.Embed(title="New Vouch Received", color=discord.Color.purple())
+        embed.add_field(name="Customer", value=self.user.mention, inline=False)
+        embed.add_field(name="Product", value=self.product, inline=False)
+        embed.add_field(name="Feedback", value=feedback, inline=False)
+        embed.set_thumbnail(url=LOGO_URL)
+        embed.set_footer(text="Thanks for your support! | Made by Kai", icon_url=LOGO_URL)
 
-    try:
-        msg = await bot.wait_for("message", timeout=60, check=check)
-    except asyncio.TimeoutError:
-        await interaction.followup.send("Feedback not received in time.", ephemeral=True)
-        return
+        channel = bot.get_channel(VOUCH_CHANNEL_ID)
+        if channel:
+            await channel.send(embed=embed)
 
-    customer = interaction.user.mention
-    product = view.selected_product
-    feedback = msg.content
+        await interaction.response.send_message("✅ Vouch submitted successfully!", ephemeral=True)
 
-    c.execute("INSERT INTO vouches (user_id, customer, product, feedback) VALUES (?, ?, ?, ?)",
-              (str(user.id), customer, product, feedback))
-    conn.commit()
-
-    embed = discord.Embed(title="New Vouch Received", color=discord.Color.dark_magenta())
-    embed.add_field(name="Customer", value=customer, inline=False)
-    embed.add_field(name="Product", value=product, inline=False)
-    embed.add_field(name="Feedback", value=feedback, inline=False)
-    embed.set_thumbnail(url="https://cdn.discordapp.com/attachments/1230847784354521118/1225712406036998204/6EAA5AB2-0DC4-445A-AF89-0B5A3823D21B.jpeg")
-    embed.set_footer(text="Thanks for your support! | Made by Kai", icon_url="https://cdn.discordapp.com/attachments/1230847784354521118/1225712406036998204/6EAA5AB2-0DC4-445A-AF89-0B5A3823D21B.jpeg")
-
-    channel = bot.get_channel(VOUCH_CHANNEL_ID)
-    if channel:
-        await channel.send(embed=embed)
-
-    await interaction.followup.send("Vouch submitted successfully!", ephemeral=True)
+@bot.tree.command(name="vouch", description="Submit a vouch", guild=discord.Object(id=GUILD_ID))
+async def vouch(interaction: discord.Interaction):
+    await interaction.response.send_message("Please select a product:", view=ProductView(interaction.user), ephemeral=True)
 
 @bot.event
 async def on_ready():
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    print(f"Bot is ready. Logged in as {bot.user}")
+    print(f"✅ Bot is ready. Logged in as {bot.user}")
 
 bot.run(TOKEN)
