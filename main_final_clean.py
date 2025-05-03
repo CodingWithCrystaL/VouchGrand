@@ -9,8 +9,13 @@ import os
 
 # === Railway Environment Variables ===
 TOKEN = os.getenv("TOKEN")
+print(f"TOKEN loaded: {bool(TOKEN)}")
+
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
+print(f"LOG_CHANNEL_ID loaded: {os.getenv('LOG_CHANNEL_ID')}")
+
 GUILD_ID = int(os.getenv("GUILD_ID"))
+print(f"GUILD_ID loaded: {os.getenv('GUILD_ID')}")
 
 # === Keep Alive ===
 app = Flask(__name__)
@@ -59,7 +64,6 @@ PRODUCTS = [
 
 GRANDX_LOGO_URL = "https://cdn.discordapp.com/attachments/1226891662254286911/1235928196612139090/7E21D39E-ECDF-4C6C-B393-347F979B16CE.jpeg"
 
-# === Database Setup ===
 async def init_db():
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute("""
@@ -75,7 +79,6 @@ async def init_db():
         """)
         await db.commit()
 
-# === Dropdowns ===
 class ProductSelect(Select):
     def __init__(self, view):
         self.parent_view = view
@@ -120,20 +123,18 @@ class RatingView(View):
         self.parent_view = parent_view
         self.add_item(RatingSelect(parent_view))
 
-# === On Bot Ready ===
 @bot.event
 async def on_ready():
     await init_db()
     try:
-        await tree.clear_commands(guild=discord.Object(id=GUILD_ID))  # Clears old commands
-        await tree.sync(guild=discord.Object(id=GUILD_ID))            # Syncs new
+        await tree.clear_commands(guild=discord.Object(id=GUILD_ID))
+        await tree.sync(guild=discord.Object(id=GUILD_ID))
         print("✅ Slash commands synced")
     except Exception as e:
         print(f"❌ Failed to sync commands: {e}")
     await bot.change_presence(activity=discord.Game(name="Vouching Service"))
     print(f"✅ Bot is online as {bot.user}")
 
-# === /vouch Command ===
 @tree.command(name="vouch", description="Give a vouch to someone", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User to vouch for", feedback="Your feedback message")
 async def vouch(interaction: discord.Interaction, user: discord.Member, feedback: str):
@@ -169,7 +170,6 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, feedback
 
     await interaction.followup.send("✅ Your vouch has been submitted!", ephemeral=True)
 
-# === Run Bot ===
 try:
     bot.run(TOKEN)
 except Exception as e:
