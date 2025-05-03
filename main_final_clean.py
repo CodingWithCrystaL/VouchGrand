@@ -9,6 +9,7 @@ GUILD_ID = int(os.getenv("GUILD_ID"))
 CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
 
 intents = discord.Intents.default()
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 PRODUCTS = [
@@ -38,74 +39,69 @@ PRODUCTS = [
     ("OTHER PRODUCT", "OTHER PRODUCT")
 ]
 
-RATINGS = [
-    ("1", "1 ⭐"),
-    ("2", "2 ⭐⭐"),
-    ("3", "3 ⭐⭐⭐"),
-    ("4", "4 ⭐⭐⭐⭐"),
-    ("5", "5 ⭐⭐⭐⭐⭐")
-]
-
 class ProductSelect(discord.ui.Select):
-    def __init__(self):
+    def __init__(self, vouched_user, feedback, vouched_by):
+        self.vouched_user = vouched_user
+        self.feedback = feedback
+        self.vouched_by = vouched_by
+
         options = [discord.SelectOption(label=label, value=value) for value, label in PRODUCTS]
-        super().__init__(placeholder="Select a product", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="Select the product", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         product = self.values[0]
-        await interaction.response.send_message("Now select a rating:", view=RatingView(product), ephemeral=True)
 
-class RatingSelect(discord.ui.Select):
-    def __init__(self, product):
-        self.product = product
-        options = [discord.SelectOption(label=label, value=value) for value, label in RATINGS]
-        super().__init__(placeholder="Select a rating", min_values=1, max_values=1, options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        rating = self.values[0]
-        customer = interaction.user
-
+        # Save to database
         conn = sqlite3.connect("vouches.db")
         c = conn.cursor()
-        c.execute("CREATE TABLE IF NOT EXISTS vouches (user_id TEXT, product TEXT, rating INTEGER)")
-        c.execute("INSERT INTO vouches (user_id, product, rating) VALUES (?, ?, ?)", (str(customer.id), self.product, int(rating)))
+        c.execute('''CREATE TABLE IF NOT EXISTS vouches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            vouched_user_id TEXT,
+            vouched_by_id TEXT,
+            product TEXT,
+            feedback TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        c.execute("INSERT INTO vouches (vouched_user_id, vouched_by_id, product, feedback) VALUES (?, ?, ?, ?)",
+                  (str(self.vouched_user.id), str(self.vouched_by.id), product, self.feedback))
         conn.commit()
         conn.close()
 
-        embed = discord.Embed(
-            title="Feedback Received",
-            description="We received feedback for your transaction!",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="Customer", value=customer.mention, inline=False)
-        embed.add_field(name="Product", value=dict(PRODUCTS).get(self.product, self.product), inline=True)
-        embed.add_field(name="Rating", value=f"{rating} ⭐", inline=True)
-        embed.set_thumbnail(url="https://cdn.discordapp.com/attachments/123456789/logo.png")
+        embed = discord.Embed(title="New Vouch Received", color=discord.Color.purple())
+        embed.add_field(name="Customer", value=self.vouched_user.mention, inline=False)
+        embed.add_field(name="Product", value=product, inline=True)
+        embed.add_field(name="Feedback", value=self.feedback, inline=False)
+        embed.add_field(name="Vouched By", value=self.vouched_by.mention, inline=True)
+        embed.set_thumbnail(url=self.vouched_by.avatar.url if self.vouched_by.avatar else None)
         embed.set_footer(text="Thanks for your support! | Made by Kai")
 
         channel = bot.get_channel(CHANNEL_ID)
         if channel:
             await channel.send(embed=embed)
 
-        await interaction.response.send_message("✅ Vouch submitted successfully!", ephemeral=True)
+        await interaction.response.send_message("✅ Vouch submitted!", ephemeral=True)
 
 class ProductView(discord.ui.View):
-    def __init__(self):
+    def __init__(self, vouched_user, feedback, vouched_by):
         super().__init__(timeout=60)
-        self.add_item(ProductSelect())
-
-class RatingView(discord.ui.View):
-    def __init__(self, product):
-        super().__init__(timeout=60)
-        self.add_item(RatingSelect(product))
+        self.add_item(ProductSelect(vouched_user, feedback, vouched_by))
 
 @bot.event
 async def on_ready():
     await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
     print(f"✅ Bot is online as {bot.user}")
 
-@bot.tree.command(name="vouch", description="Vouch for a user")
-async def vouch(interaction: discord.Interaction):
-    await interaction.response.send_message("Please select the product:", view=ProductView(), ephemeral=True)
+@bot.tree.command(name="vouch", description="Vouch for a user", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(user="User to vouch for", feedback="Your feedback")
+async def vouch(interaction: discord.Interaction, user: discord.Member, feedback: str):
+    if user.id == interaction.user.id:
+        await interaction.response.send_message("❌ You can't vouch for yourself!", ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        "Please select the product for the vouch:",
+        view=ProductView(user, feedback, interaction.user),
+        ephemeral=True
+    )
 
 bot.run(TOKEN)
