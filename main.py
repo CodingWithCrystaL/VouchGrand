@@ -1,4 +1,3 @@
-
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -6,13 +5,14 @@ from discord.ui import View, Select
 import aiosqlite
 from flask import Flask
 from threading import Thread
+import os
 
-# === HARD CODED CONFIG ===
-TOKEN = "YOUR_DISCORD_BOT_TOKEN"  # Replace with your token
-LOG_CHANNEL_ID = 123456789012345678  # Replace with log channel ID
-GUILD_ID = 123456789012345678        # Replace with your server ID
+# === RAILWAY ENVIRONMENT VARIABLES ===
+TOKEN = os.getenv("TOKEN")
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
+GUILD_ID = int(os.getenv("GUILD_ID"))
 
-# === KEEP ALIVE ===
+# === KEEP ALIVE (Optional) ===
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -75,7 +75,7 @@ async def init_db():
         """)
         await db.commit()
 
-# === VIEWS ===
+# === DROPDOWNS ===
 class ProductSelect(Select):
     def __init__(self, view):
         self.parent_view = view
