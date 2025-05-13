@@ -82,7 +82,7 @@ class FeedbackModal(discord.ui.Modal, title="Provide Feedback"):
         conn.commit()
         conn.close()
 
-        embed = discord.Embed(title="New Vouch Received", color=discord.Color.purple())
+        embed = discord.Embed(title="New Vouch Received", color=discord.Color.from_rgb(255, 255, 255))
         embed.add_field(name="Customer", value=self.user.mention, inline=False)
         embed.add_field(name="Product", value=self.product, inline=False)
         embed.add_field(name="Feedback", value=feedback, inline=False)
